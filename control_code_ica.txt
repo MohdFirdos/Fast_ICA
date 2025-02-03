@@ -1,0 +1,608 @@
+`timescale 1ns / 1ps
+module control#
+(
+        parameter DATA_WIDTH = 32,
+        parameter CORDIC_WIDTH = 38,
+        parameter ANGLE_WIDTH = 32,
+        parameter CORDIC_STAGES = 16,
+        parameter NUM_VECTORS = 7
+)
+ (
+    input clk,
+    input [3:0]addrm,
+    input [3:0]addr,
+    input nreset,
+   
+    input signed [DATA_WIDTH-1:0] w11,w12,w13,w14,w15,w16,w17,
+    input signed [DATA_WIDTH-1:0] z1,z2,z3,z4,z5,z6,z7,
+    output reg signed [DATA_WIDTH-1:0] out1, out2, out3,out4,out5,out6,out7
+ );
+
+//
+ reg signed [DATA_WIDTH-1:0] z[0:NUM_VECTORS-1];
+ reg estrst;
+ reg ctl;
+ //
+ reg signed [DATA_WIDTH-1:0] mem_in [0:NUM_VECTORS-1][0:NUM_VECTORS-1];
+ reg signed [DATA_WIDTH-1:0] mem_norm [0:NUM_VECTORS-1][0:NUM_VECTORS-1];
+ reg signed [DATA_WIDTH-1:0] mem_upd [0:NUM_VECTORS-1][0:NUM_VECTORS-1];
+ reg signed [DATA_WIDTH-1:0] mem_gso [1:NUM_VECTORS-1][0:NUM_VECTORS-1];
+  reg signed [DATA_WIDTH-1:0] mem_out [0:NUM_VECTORS-1][0:15];
+ 
+ wire signed [DATA_WIDTH-1:0] norm_out_data [0:NUM_VECTORS-1];
+
+ reg signed [DATA_WIDTH-1:0] norm_in_data [0:NUM_VECTORS-1];
+ wire signed [DATA_WIDTH-1:0] norm_in_data1 [0:NUM_VECTORS-1];
+ 
+ 
+ 
+  wire signed [DATA_WIDTH-1:0] est_out_data ;
+ //
+ //
+ reg signed [DATA_WIDTH-1:0] gso_in_data1 [0:NUM_VECTORS-1];
+ reg signed [DATA_WIDTH-1:0] gso_in_data2 [0:NUM_VECTORS-1];
+ wire signed [DATA_WIDTH-1:0] gso_out_data [0:NUM_VECTORS-1];
+ 
+ reg signed [DATA_WIDTH-1:0] update_in_data1 [0:NUM_VECTORS-1];
+ reg signed [DATA_WIDTH-1:0] update_in_data2 [0:15][0:NUM_VECTORS-1];
+ wire signed [DATA_WIDTH-1:0] update_out_data [0:NUM_VECTORS-1];
+ 
+ reg [7:0] cnt1;
+ reg [7:0] cnt2;
+ reg [7:0] cnt3;
+ reg [7:0]cnt4;
+ reg [5:0]cnt5;
+ wire gso_out,norm_out,update_out;
+ reg norm_in;
+ reg gso_in;
+ reg update_in;
+
+reg [24:0]count;
+reg [16:0]count1;
+reg [3:0]no_count;
+reg est_in;
+reg est_en;
+wire est_out;
+wire est_val;
+
+    norm#(
+        .DATA_WIDTH (DATA_WIDTH),
+        .CORDIC_WIDTH (CORDIC_WIDTH),
+        .ANGLE_WIDTH (ANGLE_WIDTH),
+        .CORDIC_STAGES (CORDIC_STAGES)
+        )normalization(
+            .clk(clk),
+            .rst(norm_in), 
+            .w11(norm_in_data[0]),
+            .w12(norm_in_data[1]),     
+            .w13(norm_in_data[2]),   
+            .w14(norm_in_data[3]),      
+            .w15(norm_in_data[4]),  
+            .w16(norm_in_data[5]),  
+            .w17(norm_in_data[6]),    
+            .wout11(norm_out_data[0]),
+            
+            .wout12(norm_out_data[1]),
+            .wout13(norm_out_data[2]),
+            .wout14(norm_out_data[3]),
+            .wout15(norm_out_data[4]),
+            .wout16(norm_out_data[5]),
+            .wout17(norm_out_data[6]),
+            .norm_out(norm_out)
+            );
+            
+            
+    gso#(
+        .DATA_WIDTH (DATA_WIDTH),
+        .CORDIC_WIDTH (CORDIC_WIDTH),
+        .ANGLE_WIDTH (ANGLE_WIDTH),
+        .CORDIC_STAGES (CORDIC_STAGES)
+        )
+        Orthogonalization(
+            .clk(clk),
+            .rst(gso_in), 
+            
+            .w11(gso_in_data1[0]),
+            .w12(gso_in_data1[1]),
+            .w13(gso_in_data1[2]),
+            .w14(gso_in_data1[3]),
+            .w15(gso_in_data1[4]),
+            .w16(gso_in_data1[5]),
+            .w17(gso_in_data1[6]),
+            
+            .w21(gso_in_data2[0]),
+            .w22(gso_in_data2[1]),
+            .w23(gso_in_data2[2]),
+            .w24(gso_in_data2[3]),
+            .w25(gso_in_data2[4]),
+            .w26(gso_in_data2[5]),
+            .w27(gso_in_data2[6]),
+            
+            .wout21(gso_out_data[0]),
+            .wout22(gso_out_data[1]),
+            .wout23(gso_out_data[2]),
+            .wout24(gso_out_data[3]),
+            .wout25(gso_out_data[4]),
+            .wout26(gso_out_data[5]),
+            .wout27(gso_out_data[6]),
+            .gso_out(gso_out)
+            
+            );
+            
+     upd_fn#(
+     
+            .DATA_WIDTH (DATA_WIDTH),
+            .CORDIC_WIDTH (CORDIC_WIDTH),
+            .ANGLE_WIDTH (ANGLE_WIDTH),
+            .CORDIC_STAGES (CORDIC_STAGES)
+            )estimation_out(
+            .clk(clk),
+            .rst(update_in), 
+            .estrst(estrst),
+            .addr(addr),
+            .ctl(ctl),
+            .w11(update_in_data1[0]),
+            .w12(update_in_data1[1]),
+            .w13(update_in_data1[2]),
+            .w14(update_in_data1[3]),
+            .w15(update_in_data1[4]),
+            .w16(update_in_data1[5]),
+            .w17(update_in_data1[6]),
+            
+            .z1(update_in_data2[addr][0]),
+            .z2(update_in_data2[addr][1]),
+            .z3(update_in_data2[addr][2]),
+            .z4(update_in_data2[addr][3]),
+            .z5(update_in_data2[addr][4]),
+            .z6(update_in_data2[addr][5]),
+            .z7(update_in_data2[addr][6]), 
+           
+            .upw1(update_out_data[0]),
+            .upw2(update_out_data[1]),
+            .upw3(update_out_data[2]),
+            .upw4(update_out_data[3]),
+            .upw5(update_out_data[4]),
+            .upw6(update_out_data[5]),
+            .upw7(update_out_data[6]),
+            
+            .update_out(update_out)
+                );
+                
+             estimation_final #(
+    .DATA_WIDTH(32),
+    .CORDIC_WIDTH(38),
+    .ANGLE_WIDTH(32),
+    .CORDIC_STAGES(16),
+    .NUM_VECTORS(7)
+) estimation_inst (
+    .clk(clk),
+    .rst(est_in),
+    .enable(est_en),
+    .w11(mem_upd[cnt3][0]),
+    .w12(mem_upd[cnt3][1]),
+    .w13(mem_upd[cnt3][2]),
+    .w14(mem_upd[cnt3][3]),
+    .w15(mem_upd[cnt3][4]),
+    .w16(mem_upd[cnt3][5]),
+    .w17(mem_upd[cnt3][6]),
+    .z11(z1),
+    .z12(z2),
+    .z13(z3),
+    .z14(z4),
+    .z15(z5),
+    .z16(z6),
+    .z17(z7),
+    .ans_out(est_out_data),
+    .est_flg(est_out),
+    .est_val(est_val)
+);
+   
+integer i;                                     
+ always@(posedge clk or negedge nreset)
+ begin
+    if(!nreset)
+        begin
+        cnt1 <= 0;
+        cnt2 <= 0;
+        cnt3 <= 0;
+        norm_in <= 0;
+        gso_in <= 0;
+        update_in <= 0;
+        count<=0;
+        no_count<=0;
+        estrst<=0;
+        ctl<=0; 
+        est_in<=0;
+        est_en<=0;
+        count1<=0;
+        cnt5<=0;
+            for(i=0;i<15;i=i+1)
+            begin
+            mem_in[i][0] <= 0;
+            mem_in[i][1] <= 0;
+            mem_in[i][2] <= 0;
+            mem_in[i][3] <= 0;
+            mem_in[i][4] <= 0;
+            mem_in[i][5] <= 0;
+            mem_in[i][6] <= 0;
+
+            mem_norm[i][0] <= 0;
+            mem_norm[i][1] <= 0;
+            mem_norm[i][2] <= 0;
+            mem_norm[i][3] <= 0;
+            mem_norm[i][4] <= 0;
+            mem_norm[i][5] <= 0;
+            mem_norm[i][6] <= 0;
+            
+            mem_upd[i][0] <= 0;
+            mem_upd[i][1] <= 0;
+            mem_upd[i][2] <= 0;
+            mem_upd[i][3] <= 0;
+            mem_upd[i][4] <= 0;
+            mem_upd[i][5] <= 0;
+            mem_upd[i][6] <= 0;
+            
+            mem_gso[i][0] <= 0;
+            mem_gso[i][1] <= 0;
+            mem_gso[i][2] <= 0;
+            mem_gso[i][3] <= 0;
+            mem_gso[i][4] <= 0;
+            mem_gso[i][5] <= 0;
+            mem_gso[i][6] <= 0;
+            
+            end
+        end
+    else
+        begin
+        count<=count+1; 
+        mem_in[addrm][0] <= w11;
+        mem_in[addrm][1] <= w12;
+        mem_in[addrm][2] <= w13;
+        mem_in[addrm][3] <= w14;
+        mem_in[addrm][4] <= w15;
+        mem_in[addrm][5] <= w16;
+        mem_in[addrm][6] <= w17;
+        end   
+        begin
+        ///Normalization
+            if((cnt1==0 && count>8 && norm_out!=1)||(cnt1==1 && count>516 && norm_out!=1)||(cnt1==2 && count>1257 && norm_out!=1)||(cnt1==3 && count>2227 && norm_out!=1)||(cnt1==4 && count>3429 && norm_out!=1)||(cnt1==5 && count>4862 && norm_out!=1)||(cnt1==6 && count>6526 && norm_out!=1))
+            begin
+                if(cnt1==0)
+                begin
+                norm_in<=1;
+                norm_in_data[0] <= mem_in[cnt1][0];
+                norm_in_data[1] <= mem_in[cnt1][1];
+                norm_in_data[2] <= mem_in[cnt1][2];
+                norm_in_data[3] <= mem_in[cnt1][3];
+                norm_in_data[4] <= mem_in[cnt1][4];
+                norm_in_data[5] <= mem_in[cnt1][5];
+                norm_in_data[6] <= mem_in[cnt1][6];
+               
+                end
+                else
+                begin
+                norm_in<=1;
+                norm_in_data[0] <= mem_gso[cnt1][0];
+                norm_in_data[1] <= mem_gso[cnt1][1];
+                norm_in_data[2] <= mem_gso[cnt1][2];
+                norm_in_data[3] <= mem_gso[cnt1][3];
+                norm_in_data[4] <= mem_gso[cnt1][4];
+                norm_in_data[5] <= mem_gso[cnt1][5];
+                norm_in_data[6] <= mem_gso[cnt1][6];
+                end    
+            end
+            if((count<514 && count>141)||(count<1256 && count>649)||(count<2226 && count>1390)||(count<3428 && count>2360)||(count<4862 && count>3562)||(count<6526 && count>4995)||(count>6659))
+            begin
+            norm_in<=0;
+            end
+            if(norm_out==1)
+            begin
+            mem_norm[cnt1][0] <= norm_out_data[0];
+            mem_norm[cnt1][1] <= norm_out_data[1];
+            mem_norm[cnt1][2] <= norm_out_data[2];
+            mem_norm[cnt1][3] <= norm_out_data[3];
+            mem_norm[cnt1][4] <= norm_out_data[4];
+            mem_norm[cnt1][5] <= norm_out_data[5];
+            mem_norm[cnt1][6] <= norm_out_data[6];
+             
+            end
+            else
+            begin
+            mem_norm[cnt1][0] <= mem_norm[cnt1][0];
+            mem_norm[cnt1][1] <= mem_norm[cnt1][1];
+            mem_norm[cnt1][2] <= mem_norm[cnt1][2];
+            mem_norm[cnt1][3] <= mem_norm[cnt1][3];
+            mem_norm[cnt1][4] <= mem_norm[cnt1][4];
+            mem_norm[cnt1][5] <= mem_norm[cnt1][5];
+            mem_norm[cnt1][6] <= mem_norm[cnt1][6];
+            end    
+        end
+        ///Update
+        if((count>141 && count <=158)||(count>649 && count<=666)||(count>1390 && count<=1407)||(count>2361 && count<=2378)||(count>3563 && count<=3580)||(count>4997 && count<=5014)||(count>6660 && count<=6677))
+        begin
+        update_in<=1;
+        estrst=1;
+        ctl<=1;
+        update_in_data1[0] <= mem_norm[cnt1][0];
+        update_in_data1[1] <= mem_norm[cnt1][1];
+        update_in_data1[2] <= mem_norm[cnt1][2];
+        update_in_data1[3] <= mem_norm[cnt1][3];
+        update_in_data1[4] <= mem_norm[cnt1][4];
+        update_in_data1[5] <= mem_norm[cnt1][5];
+        update_in_data1[6] <= mem_norm[cnt1][6];
+        
+        update_in_data2[addr][0] <= z1;
+        update_in_data2[addr][1] <= z2;
+        update_in_data2[addr][2] <= z3;
+        update_in_data2[addr][3] <= z4;
+        update_in_data2[addr][4] <= z5;
+        update_in_data2[addr][5] <= z6;
+        update_in_data2[addr][6] <= z7;
+        
+        end
+        else if((count<286 && count>158)||(count<1390 && count>666)||(count>1407 && count<2361)||(count>2378 && count<3562)||(count>3579 && count<4997)||(count>5014 && count<6660)||(count>6677))
+        begin
+        ctl <= 0;
+        end
+        
+        if(update_out==1)
+        begin
+        update_in<=0;
+        estrst<=0;
+        mem_upd[cnt1][0] <= update_out_data[0];
+        mem_upd[cnt1][1] <= update_out_data[1];
+        mem_upd[cnt1][2] <= update_out_data[2];
+        mem_upd[cnt1][3] <= update_out_data[3];
+        mem_upd[cnt1][4] <= update_out_data[4];
+        mem_upd[cnt1][5] <= update_out_data[5];
+        mem_upd[cnt1][6] <= update_out_data[6];
+        cnt1<=cnt1+1;
+        cnt2<=0; // keeping it ready for gso loop
+        end
+        else
+        begin
+        mem_upd[cnt1][0] <= mem_upd[cnt1][0];
+        mem_upd[cnt1][1] <= mem_upd[cnt1][1];
+        mem_upd[cnt1][2] <= mem_upd[cnt1][2];
+        mem_upd[cnt1][3] <= mem_upd[cnt1][3];
+        mem_upd[cnt1][4] <= mem_upd[cnt1][4];
+        mem_upd[cnt1][5] <= mem_upd[cnt1][5];
+        mem_upd[cnt1][6] <= mem_upd[cnt1][6];
+        end
+        /////For 1st vector done, from now we start with gso
+        if(((cnt1==1 && count>286 && count<515)||(cnt1==2 && count>795 && count<1024)||(cnt1==2 && count>1026 && count<1255)||(cnt1==3 && count>1535 && count<1764)||(cnt1==3 && count>1766 && count<1995)||(cnt1==3 && count>1997 && count<2226)||(cnt1==4 && count>2506 && count<2735)||(cnt1==4 && count>2737 && count<2966)||(cnt1==4 && count>2968 && count<3197)||(cnt1==4 && count>3199 && count<3428)||(cnt1==5 && count>3708 && count<3937)||(cnt1==5 && count>3939 && count<4168)||(cnt1==5 && count>4170 && count<4399)||(cnt1==5 && count>4401 && count<4630)||(cnt1==5 && count>4632 && count<4861)||(cnt1==6 && count>5141 && count<5370)||(cnt1==6 && count>5372 && count<5601)||(cnt1==6 && count>5603 && count<5832)||(cnt1==6 && count>5834 && count<6063)||(cnt1==6 && count>6065 && count<6294)||(cnt1==6 && count>6296 && count<6525))&&(cnt2<cnt1))
+        begin
+        gso_in <= 1;
+            if(cnt2==0)
+            begin
+            gso_in_data2[0] <= mem_in[cnt1][0];
+            gso_in_data2[1] <= mem_in[cnt1][1];
+            gso_in_data2[2] <= mem_in[cnt1][2];
+            gso_in_data2[3] <= mem_in[cnt1][3];
+            gso_in_data2[4] <= mem_in[cnt1][4];
+            gso_in_data2[5] <= mem_in[cnt1][5];
+            gso_in_data2[6] <= mem_in[cnt1][6];
+            
+            gso_in_data1[0] <= mem_norm[0][0];
+            gso_in_data1[1] <= mem_norm[0][1];
+            gso_in_data1[2] <= mem_norm[0][2];
+            gso_in_data1[3] <= mem_norm[0][3];
+            gso_in_data1[4] <= mem_norm[0][4];
+            gso_in_data1[5] <= mem_norm[0][5];
+            gso_in_data1[6] <= mem_norm[0][6];
+            end
+            else
+            begin
+            gso_in_data2[0] <= mem_gso[cnt1][0];
+            gso_in_data2[1] <= mem_gso[cnt1][1];
+            gso_in_data2[2] <= mem_gso[cnt1][2];
+            gso_in_data2[3] <= mem_gso[cnt1][3];
+            gso_in_data2[4] <= mem_gso[cnt1][4];
+            gso_in_data2[5] <= mem_gso[cnt1][5];
+            gso_in_data2[6] <= mem_gso[cnt1][6];
+            
+            gso_in_data1[0] <= mem_norm[cnt2][0];
+            gso_in_data1[1] <= mem_norm[cnt2][1];
+            gso_in_data1[2] <= mem_norm[cnt2][2];
+            gso_in_data1[3] <= mem_norm[cnt2][3];
+            gso_in_data1[4] <= mem_norm[cnt2][4];
+            gso_in_data1[5] <= mem_norm[cnt2][5];
+            gso_in_data1[6] <= mem_norm[cnt2][6];
+            end
+    //    cnt2<=cnt2+1;
+        end
+        
+        if((count>515 && count<795)||(count>1255 && count<1535)||(count>2226 && count<2506)||(count>3428 && count<3708)||(count>4861 && count<5141)||(count>6525))
+            begin
+            gso_in<=0;
+            end
+        else if((count<1026 &&count>1024)||(count<1766 &&count>1764)||(count<1997 &&count>1995)||(count<2737 &&count>2735)||(count<2968 &&count>2966)||(count<3199 &&count>3197)||(count<3939 &&count>3937)||(count<4170 &&count>4168)||(count<4401 &&count>4399)||(count<4632 &&count>4630)||(count<5372 &&count>5370)||(count<5603 &&count>5601)||(count<5834 &&count>5832)||(count<6065 &&count>6063)||(count<6296 &&count>6294)) 
+            begin
+            gso_in<=0;
+            end
+        
+        if(gso_out==1)
+        begin
+        mem_gso[cnt1][0] <= gso_out_data[0];
+        mem_gso[cnt1][1] <= gso_out_data[1];
+        mem_gso[cnt1][2] <= gso_out_data[2];
+        mem_gso[cnt1][3] <= gso_out_data[3];
+        mem_gso[cnt1][4] <= gso_out_data[4];
+        mem_gso[cnt1][5] <= gso_out_data[5];
+        mem_gso[cnt1][6] <= gso_out_data[6];
+        end
+        else
+        begin
+        mem_gso[cnt1][0] <= mem_gso[cnt1][0];
+        mem_gso[cnt1][1] <= mem_gso[cnt1][1];
+        mem_gso[cnt1][2] <= mem_gso[cnt1][2];
+        mem_gso[cnt1][3] <= mem_gso[cnt1][3];
+        mem_gso[cnt1][4] <= mem_gso[cnt1][4];
+        mem_gso[cnt1][5] <= mem_gso[cnt1][5];
+        mem_gso[cnt1][6] <= mem_gso[cnt1][6];
+        end
+        
+        if(gso_out==1 && ((count>795 && count<1255)||(count>1535 && count<2226)||(count>2506 && count<3428)||(count>3708 && count<4861)||(count>5141 && count<6525)))
+        begin
+        cnt2<=cnt2+1;
+        end
+        else if(gso_out==0 && ((count>795 && count<1255)||(count>1535 && count<2226)||(count>2506 && count<3428)||(count>3708 && count<4861)||(count>5141 && count<6525)))
+        begin
+        cnt2<=cnt2;
+        end
+        else
+        cnt2<=0;
+        //estimation---
+        //clear
+        if(count==6705)
+        cnt3<=7;
+        
+        if(count>6807 && count<8938)
+        begin
+        if(est_out==1)
+        begin
+        cnt4<=cnt4+1;
+        end
+        else
+        begin
+        cnt4<=cnt4;
+        end
+        count1<=count1+1;
+        cnt3<=0;
+        end
+        
+        
+        else if(count>8940 && count<11070)
+        begin
+        if(est_out==1)
+        begin
+        cnt4<=cnt4+1;
+        end
+        else
+        begin
+        cnt4<=cnt4;
+        end
+        count1<=count1+1;
+        cnt3<=1;
+        end
+        
+        
+        else if(count>11072 && count<13202)
+        begin
+        if(est_out==1)
+        begin
+        cnt4<=cnt4+1;
+        end
+        else
+        begin
+        cnt4<=cnt4;
+        end
+        count1<=count1+1;
+        cnt3<=2;
+        end
+        
+        
+        else if(count>13204 && count<15334)
+        begin
+        if(est_out==1)
+        begin
+        cnt4<=cnt4+1;
+        end
+        else
+        begin
+        cnt4<=cnt4;
+        end
+        count1<=count1+1;
+        cnt3<=3;
+        end
+        
+        
+        else if(count>15336 && count<17466)
+        begin
+        if(est_out==1)
+        begin
+        cnt4<=cnt4+1;
+        end
+        else
+        begin
+        cnt4<=cnt4;
+        end
+        count1<=count1+1;
+        cnt3<=4;
+        end
+        
+        
+        else if(count>17468 && count<19598)
+        begin
+        if(est_out==1)
+        begin
+        cnt4<=cnt4+1;
+        end
+        else
+        begin
+        cnt4<=cnt4;
+        end
+        count1<=count1+1;
+        cnt3<=5;
+        end
+        
+        
+        else if(count>19600 && count<21730)
+        begin
+        if(est_out==1)
+        begin
+        cnt4<=cnt4+1;
+        end
+        else
+        begin
+        cnt4<=cnt4;
+        end
+        count1<=count1+1;
+        cnt3<=6;
+        end
+        
+        else
+        begin
+        count1<=0;
+        cnt3<=7;
+        cnt4<=0;
+        end
+        
+        if((count1>0 && count1<132)||(count1>133 && count1<265)||(count1>266 && count1<398)||(count1>399 && count1<531)||(count1>532 && count1<664)||(count1>665 && count1<797)||(count1>798 && count1<930)||(count1>931 && count1<1063)||(count1>1064 && count1<1196)||(count1>1197 && count1<1329)||(count1>1330 && count1<1462)||(count1>1463 && count1<1595)||(count1>1596 && count1<1728)||(count1>1729 && count1<1861)||(count1>1862 && count1<1995)||(count1>1996 && count1<2128))
+        begin
+        est_in<=1;
+        est_en<=1;
+        
+        end
+        if(est_out==1||((count1>132 && count1<133)||(count1>265 && count1<266)))
+        begin
+        est_in<=0;
+        est_en<=0;
+        
+        end
+        
+        if(est_out==1)
+        begin
+        mem_out[cnt3][cnt4] <= est_out_data;
+        mem_out[cnt3][cnt4] <= est_out_data;
+        mem_out[cnt3][cnt4] <= est_out_data;
+        mem_out[cnt3][cnt4] <= est_out_data;
+        mem_out[cnt3][cnt4] <= est_out_data;
+        mem_out[cnt3][cnt4] <= est_out_data;
+        mem_out[cnt3][cnt4] <= est_out_data;
+        end
+        if(count>21736)
+        begin
+        cnt5<=cnt5+1;
+        out1 <= mem_out[0][cnt5];
+        out2 <= mem_out[1][cnt5];
+        out3 <= mem_out[2][cnt5];
+        out4 <= mem_out[3][cnt5];
+        out5 <= mem_out[4][cnt5];
+        out6 <= mem_out[5][cnt5];
+        out7 <= mem_out[6][cnt5];
+        end
+
+        
+ end
+endmodule

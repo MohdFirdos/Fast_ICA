@@ -1,0 +1,126 @@
+`timescale 1ns / 1ps
+module mem7#
+(
+        parameter DATA_WIDTH = 32,
+        parameter NUM_VECTORS = 16
+        )
+(
+input clk,rst,
+input ctl,
+input [3:0]addr,
+input [5:0]count,
+input [3:0]no_count,
+input signed[DATA_WIDTH-1:0]z1,z2,z3,z4,z5,z6,z7,
+output signed[DATA_WIDTH-1:0]zout1,zout2,zout3,zout4,zout5,zout6,zout7
+    );
+//reg check;
+reg signed[DATA_WIDTH-1:0]zdummy1,zdummy2,zdummy3,zdummy4,zdummy5,zdummy6,zdummy7;
+reg signed[DATA_WIDTH-1:0]mem1[0:15];
+reg signed[DATA_WIDTH-1:0]mem2[0:15];
+reg signed[DATA_WIDTH-1:0]mem3[0:15];
+reg signed[DATA_WIDTH-1:0]mem4[0:15];
+reg signed[DATA_WIDTH-1:0]mem5[0:15];
+reg signed[DATA_WIDTH-1:0]mem6[0:15];
+reg signed[DATA_WIDTH-1:0]mem7[0:15];
+reg [3:0] dummy_addr;
+//reg [DATA_WIDTH-1:0]zg7d;
+reg [31:0] temp1,temp2,temp3,temp4,temp5,temp6,temp7;
+integer i;
+always@(posedge clk)
+begin
+   if(rst===0)
+   begin
+//    check <= 0;
+        //mem1[0] <= 1;
+      for(i=0;i<16;i=i+1)
+      begin
+          mem1[i]<=32'h000_00000;
+          mem2[i]<=32'h000_00000;
+          mem3[i]<=32'h000_00000;
+          mem4[i]<=32'h000_00000;
+          mem5[i]<=32'h000_00000;
+          mem6[i]<=32'h000_00000;
+          mem7[i]<=32'h000_00000;
+      end
+ 
+        temp1 <= 32'h000_00000;
+        temp2 <= 32'h000_00000;
+        temp3 <= 32'h000_00000;
+        temp4 <= 32'h000_00000;
+        temp5 <= 32'h000_00000;
+        temp6 <= 32'h000_00000;
+        temp7 <= 32'h000_00000;
+
+//       temp2<=32'h000_00000;
+//       temp3<=32'h000_00000;
+//       temp4<=32'h000_00000;
+//       temp5<=32'h000_00000;
+//       temp6<=32'h000_00000;
+//       temp7<=32'h000_00000;
+   
+   end
+   else
+      begin
+          if(ctl===1)
+              begin
+//                  check <= 1;
+                  dummy_addr <= addr;
+                  //mem1[dummy_addr] <= 5000;
+                  mem1[addr-1]<=zdummy1;
+                  mem2[addr-1]<=zdummy2;
+                  mem3[addr-1]<=zdummy3;
+                  mem4[addr-1]<=zdummy4;
+                  mem5[addr-1]<=zdummy5;
+                  mem6[addr-1]<=zdummy6;
+                  mem7[addr-1]<=zdummy7;
+              end
+      else
+      begin
+         
+    if(count>6'd15)
+    begin
+    temp1<=32'd0;
+    temp2<=32'd0;
+    temp3<=32'd0;
+    temp4<=32'd0;
+    temp5<=32'd0;
+    temp6<=32'd0;
+    temp7<=32'd0;
+    end  
+    else 
+    if (no_count == 4'b0001||no_count == 4'b0010||no_count == 4'b0011||no_count == 4'b0100||no_count == 4'b0101||no_count == 4'b0110||no_count == 4'b0111) 
+    begin
+    temp1 <= mem1[count];
+    temp2 <= mem2[count];
+    temp3 <= mem3[count];
+    temp4 <= mem4[count];
+    temp5 <= mem5[count];
+    temp6 <= mem6[count];
+    temp7 <= mem7[count];
+    end
+   
+    
+   end
+  end    
+    
+end
+always@(negedge clk)
+begin
+             zdummy1 <= z1;
+             zdummy2 <= z2;
+             zdummy3 <= z3;
+             zdummy4 <= z4;
+             zdummy5 <= z5;
+             zdummy6 <= z6;
+             zdummy7 <= z7;
+end
+assign zout1 = temp1;
+assign zout2 = temp2;
+assign zout3 = temp3;
+assign zout4 = temp4;
+assign zout5 = temp5;
+assign zout6 = temp6;
+assign zout7 = temp7;
+
+    
+endmodule

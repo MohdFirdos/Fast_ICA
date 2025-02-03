@@ -1,0 +1,310 @@
+`timescale 1ns / 1ps
+module upd_fn#
+(
+        parameter DATA_WIDTH = 32,
+        parameter CORDIC_WIDTH = 38,
+        parameter ANGLE_WIDTH = 32,
+        parameter CORDIC_STAGES = 16,
+        parameter NUM_VECTORS = 7
+        )
+(
+input clk,rst,estrst,
+input ctl,
+input [3:0]addr,
+input signed[DATA_WIDTH-1:0]z1,z2,z3,z4,z5,z6,z7,
+input signed[DATA_WIDTH-1:0]w11,w12,w13,w14,w15,w16,w17,
+output reg signed[DATA_WIDTH-1:0]upw1,upw2,upw3,upw4,upw5,upw6,upw7,
+output reg update_out
+    );
+
+reg signed[63:0]zcube1,zcube2,zcube3,zcube4,zcube5,zcube6,zcube7;
+reg signed[63:0] zcubesum1,zcubesum2,zcubesum3,zcubesum4,zcubesum5,zcubesum6,zcubesum7;
+reg signed[63:0] cube;
+wire signed[DATA_WIDTH-1:0]zm1,zm2,zm3,zm4,zm5,zm6,zm7;
+reg [5:0]count;
+reg [3:0]skpcnt;
+reg [3:0]no_count;
+reg signed[DATA_WIDTH-1:0]g7d1,g7d2,g7d3,g7d4,g7d5,g7d6,g7d7;
+reg signed[63:0]estfn1,estfn2,estfn3,estfn4,estfn5,estfn6,estfn7;
+wire signed[DATA_WIDTH-1:0] g7d;
+wire flag;
+
+estimation #
+(
+       .DATA_WIDTH(DATA_WIDTH), 
+       .CORDIC_WIDTH(CORDIC_WIDTH),
+       .ANGLE_WIDTH(ANGLE_WIDTH), 
+       .CORDIC_STAGES(CORDIC_STAGES),
+       .NUM_VECTORS(NUM_VECTORS)
+)
+est(
+.clk(clk),
+.rst(estrst),
+.w11(w11),
+.w12(w12),
+.w13(w13),
+.w14(w14),
+.w15(w15),
+.w16(w16),
+.w17(w17),
+.z1(z1),
+.z2(z2),
+.z3(z3),
+.z4(z4),
+.z5(z5),
+.z6(z6),
+.z7(z7),
+.g7d(g7d),
+.update_out(flag)
+);
+//reg [DATA_WIDTH-1:0]zg7d;
+mem7#(
+  .DATA_WIDTH (DATA_WIDTH),
+  .NUM_VECTORS(NUM_VECTORS)
+) mem7 (
+  .clk(clk),
+  .rst(rst),
+  .ctl(ctl),
+  .addr(addr),
+  .zout1(zm1),
+  .zout2(zm2),
+  .zout3(zm3),
+  .zout4(zm4),
+  .zout5(zm5),
+  .zout6(zm6),
+  .zout7(zm7),
+  .z1(z1),
+.z2(z2),
+.z3(z3),
+.z4(z4),
+.z5(z5),
+.z6(z6),
+.z7(z7),
+.no_count(no_count),
+.count(count)
+);
+
+always@(posedge clk)
+begin
+   
+   if(rst==0)
+   begin
+    zcube1 <= 0;
+    zcube2 <= 0;
+    zcube3 <= 0;
+    zcube4 <= 0;
+    zcube5 <= 0;
+    zcube6 <= 0;
+    zcube7 <= 0;    
+    zcubesum1 <= 0;
+    zcubesum2 <= 0;
+    zcubesum3 <= 0;
+    zcubesum4 <= 0;
+    zcubesum5 <= 0;
+    zcubesum6 <= 0;
+    zcubesum7 <= 0;
+    cube <= 0;
+    estfn1 <= 0;
+    estfn2 <= 0;
+    estfn3 <= 0;
+    estfn4 <= 0;
+    estfn5 <= 0;
+    estfn6 <= 0;
+    estfn7 <= 0;
+    count<=0;
+    skpcnt<=5;
+    no_count<=0;
+    g7d1 <= 0;
+    g7d2 <= 0;
+    g7d3 <= 0;
+    g7d4 <= 0;
+    g7d5 <= 0;
+    g7d6 <= 0;
+    g7d7 <= 0;
+      end
+      else
+      begin
+       if(flag===1)
+      begin
+      no_count<=no_count+1;
+      count<=0;
+      skpcnt<=0;
+      end
+      else
+      begin
+      if(skpcnt<=3)
+      skpcnt<=skpcnt+1;
+      else
+      skpcnt<=skpcnt;
+      if(count>19)
+      count<=count;
+      else
+      begin
+      if(skpcnt>=2 && skpcnt<5)
+      begin
+      count<=count+1;
+      end
+      end
+      
+      end
+      
+      
+      
+      
+      
+      if(count>15)
+      begin
+        g7d1 <= 0;
+        g7d2 <= 0;
+        g7d3 <= 0;
+        g7d4 <= 0;
+        g7d5 <= 0;
+        g7d6 <= 0;
+        g7d7 <= 0;
+      end
+      else 
+      begin
+      if (no_count == 4'b0001) begin
+            g7d1 <= g7d; 
+        end else if (no_count == 4'b0010) begin
+            g7d2 <= g7d; 
+        end else if (no_count == 4'b0011) begin
+            g7d3 <= g7d; 
+        end else if (no_count == 4'b0100) begin
+            g7d4 <= g7d; 
+        end else if (no_count == 4'b0101) begin
+            g7d5 <= g7d; 
+        end else if (no_count == 4'b0110) begin
+            g7d6 <= g7d; 
+        end else if (no_count == 4'b0111) begin
+            g7d7 <= g7d; 
+        end
+      end
+      
+if (no_count == 4'b0001) begin
+    cube <= ((((g7d1 * g7d1) >>> 20) * g7d1) >>> 20);
+ //   no_count <= (flag) ? 4'b0001 : 4'b0000;
+end
+
+if (no_count == 4'b0010) begin
+   g7d2<=g7d; 
+    cube <= ((((g7d2 * g7d2) >>> 20) * g7d2) >>> 20);
+ //   no_count <= (flag) ? 4'b0010 : 4'b0001;
+end
+
+if (no_count == 4'b0011) begin
+    cube <= ((((g7d3 * g7d3) >>> 20) * g7d3) >>> 20);
+ //   no_count <= (flag) ? 4'b0011 : 4'b0010;
+end
+
+if (no_count == 4'b0100) begin
+    cube <= ((((g7d4 * g7d4) >>> 20) * g7d4) >>> 20);
+  //  no_count <= (flag) ? 4'b0100 : 4'b0011;
+end
+
+if (no_count == 4'b0101) begin
+    cube <= ((((g7d5 * g7d5) >>> 20) * g7d5) >>> 20);
+ //   no_count <= (flag) ? 4'b0101 : 4'b0100;
+end
+
+if (no_count == 4'b0110) begin
+    cube <= ((((g7d6 * g7d6) >>> 20) * g7d6) >>> 20);
+ //   no_count <= (flag) ? 4'b0110 : 4'b0101;
+end
+   
+if (no_count == 4'b0111) begin
+    cube <= ((((g7d7 * g7d7) >>> 20) * g7d7) >>> 20);
+ //   no_count <= (flag) ? 4'b0111 : 4'b0110;
+end
+    
+    
+      if(count>0)
+      begin 
+          zcube1<=(((cube) * zm1) >>> 20);
+          zcube2<=(((cube) * zm2) >>> 20);
+          zcube3<=(((cube) * zm3) >>> 20);
+          zcube4<=(((cube) * zm4) >>> 20);
+          zcube5<=(((cube) * zm5) >>> 20);
+          zcube6<=(((cube) * zm6) >>> 20);
+          zcube7<=(((cube) * zm7) >>> 20);
+      end
+      else
+      begin
+          zcube1 <= 0;
+          zcube2 <= 0;
+          zcube3 <= 0;
+          zcube4 <= 0;
+          zcube5 <= 0;
+          zcube6 <= 0;
+          zcube7 <= 0; 
+     end 
+            zcubesum1 <= zcubesum1 + zcube1;
+            zcubesum2 <= zcubesum2 + zcube2;
+            zcubesum3 <= zcubesum3 + zcube3;
+            zcubesum4 <= zcubesum4 + zcube4;
+            zcubesum5 <= zcubesum5 + zcube5;
+            zcubesum6 <= zcubesum6 + zcube6;
+            zcubesum7 <= zcubesum7 + zcube7;
+
+            if(count>6'd17)
+            begin
+                zcubesum1 <= 64'd0;
+                zcubesum2 <= 64'd0;
+                zcubesum3 <= 64'd0;
+                zcubesum4 <= 64'd0;
+                zcubesum5 <= 64'd0;
+                zcubesum6 <= 64'd0;
+                zcubesum7 <= 64'd0;
+            end
+            if(count==6'd18)
+            begin
+                estfn1 <= (zcubesum1 >>> 4);
+                estfn2 <= (zcubesum2 >>> 4);
+                estfn3 <= (zcubesum3 >>> 4);
+                estfn4 <= (zcubesum4 >>> 4);
+                estfn5 <= (zcubesum5 >>> 4);
+                estfn6 <= (zcubesum6 >>> 4);
+                estfn7 <= (zcubesum7 >>> 4);
+            end
+            else
+            begin
+                estfn1 <= 64'd0;
+                estfn2 <= 64'd0;
+                estfn3 <= 64'd0;
+                estfn4 <= 64'd0;
+                estfn5 <= 64'd0;
+                estfn6 <= 64'd0;
+                estfn7 <= 64'd0;
+            end
+            if(count==19)
+            begin
+                upw1 <= estfn1 - (3 * w11);
+                upw2 <= estfn2 - (3 * w12);
+                upw3 <= estfn3 - (3 * w13);
+                upw4 <= estfn4 - (3 * w14);
+                upw5 <= estfn5 - (3 * w15);
+                upw6 <= estfn6 - (3 * w16);
+                upw7 <= estfn7 - (3 * w17);
+            end
+            else
+            begin
+                upw1 <= 0;
+                upw2 <= 0;
+                upw3 <= 0;
+                upw4 <= 0;
+                upw5 <= 0;
+                upw6 <= 0;
+                upw7 <= 0;
+            end
+            if(count==19)
+            begin
+            update_out<=1;
+            end
+            else
+            begin
+            update_out<=0;
+            end
+    end 
+end
+     
+endmodule

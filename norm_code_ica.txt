@@ -1,0 +1,294 @@
+`timescale 1ns / 1ps
+module norm#
+(
+        parameter DATA_WIDTH = 32,
+        parameter CORDIC_WIDTH = 38,
+        parameter ANGLE_WIDTH = 32,
+        parameter CORDIC_STAGES = 16,
+        parameter NUM_VECTORS = 7
+        
+)
+(
+	input clk,
+	input rst,
+	output norm_out,
+	input enable,
+	input signed [DATA_WIDTH-1:0] w11,w12,w13,w14,w15,w16,w17,
+	output signed [DATA_WIDTH-1:0] wout11,wout12,wout13,wout14,wout15,wout16,wout17
+);
+wire signed [DATA_WIDTH-1:0] mux_out_xin_vect;
+wire signed [DATA_WIDTH-1:0] mux_out_yin_vect;
+wire signed [DATA_WIDTH-1:0] mux_out_yin_rot;
+reg signed [DATA_WIDTH-1:0] norm;
+
+// Input signals are implicitly wires, no need to declare them again.
+// Vectoring Inputs
+reg cordic_vec_en;
+reg signed [DATA_WIDTH-1:0] cordic_vec_xin;
+reg signed [DATA_WIDTH-1:0] cordic_vec_yin;
+reg cordic_vec_angle_calc_en;                 // Enable calculation of total angle from the micro-angles
+// Rotation Inputs
+reg cordic_rot_en;
+reg signed [DATA_WIDTH-1:0] cordic_rot_xin;
+reg signed [DATA_WIDTH-1:0] cordic_rot_yin;
+reg cordic_rot_angle_microRot_n;              // HIGH => Rotation Angle is given directly; LOW => Angle given as micro-rotations
+reg signed [ANGLE_WIDTH-1:0] cordic_rot_angle_in;
+reg [CORDIC_STAGES-1:0] cordic_rot_microRot_ext_in;
+reg cordic_rot_microRot_ext_vld;              // If HIGH => Micro-rotations are given from outside; LOW => Directly from Vectoring
+reg [1:0] cordic_rot_quad_in;
+
+// Vectoring Outputs (assuming assigned inside always blocks)
+wire cordic_vec_opvld;
+wire signed [DATA_WIDTH-1:0] cordic_vec_xout;
+wire [1:0] vec_quad;
+wire signed [ANGLE_WIDTH-1:0] vec_angle_out;
+wire [CORDIC_STAGES-1:0] vec_microRot_dir;
+wire vec_microRot_out_start;
+
+// Rotation Outputs (assuming assigned inside always blocks)
+wire cordic_rot_opvld;
+wire signed [DATA_WIDTH-1:0] cordic_rot_xout;
+wire signed [DATA_WIDTH-1:0] cordic_rot_yout;
+
+CORDIC_doubly_pipe_top #(
+        .DATA_WIDTH (DATA_WIDTH),
+        .CORDIC_WIDTH (CORDIC_WIDTH),
+        .ANGLE_WIDTH (ANGLE_WIDTH),
+        .CORDIC_STAGES (CORDIC_STAGES)
+    )doubly_pipeline(
+         .clk(clk),
+         .nreset(rst),
+        
+        // Vectoring Inputs
+
+         .cordic_vec_en(cordic_vec_en),
+         .cordic_vec_xin(mux_out_xin_vect),
+         .cordic_vec_yin(mux_out_yin_vect),
+         .cordic_vec_angle_calc_en(cordic_vec_angle_calc_en),               // Enable calculation of total angle from the micro-angles
+        
+        // Rotation Inputs
+        
+         .cordic_rot_en(cordic_rot_en),
+         .cordic_rot_xin(0),
+         .cordic_rot_yin(mux_out_yin_rot),
+         .cordic_rot_angle_microRot_n(0),         // HIGH => Rotation Angle is given directly; LOW => Angle given as micro-rotations
+         .cordic_rot_angle_in(0),     
+         .cordic_rot_microRot_ext_in(0),
+         .cordic_rot_microRot_ext_vld(0),         // If HIGH => Micro-rotations are given from outside; LOW => Directly from Vectoring
+         .cordic_rot_quad_in(0),   
+              
+        // Vectoring Outputs
+        
+         .cordic_vec_opvld(cordic_vec_opvld),
+         .cordic_vec_xout(cordic_vec_xout), // I HAVE TO ASSIGN THIS TO NORM
+         .vec_quad(vec_quad),
+         .vec_angle_out(vec_angle_out),
+         .vec_microRot_dir(vec_microRot_dir),
+         .vec_microRot_out_start(vec_microRot_out_start),
+         
+       // Rotation Outputs
+       
+         .cordic_rot_opvld(cordic_rot_opvld),
+         .cordic_rot_xout(cordic_rot_xout),
+         .cordic_rot_yout(cordic_rot_yout)
+
+);
+
+reg [15:0] counter;
+reg  [15:0] counter_dummy;
+reg sel_x_in_vect;
+reg [2:0] sel_y_in_vect;
+reg [2:0] sel_y_in_rot;
+reg signed [DATA_WIDTH-1:0] w_rot [0:NUM_VECTORS];
+// reg signed [DATA_WIDTH-1:0] norm_vect;                       // NORM FROM THE VECTORING BLOCK
+
+assign mux_out_yin_vect = (sel_y_in_vect == 2'b00) ? w12 :
+                   (sel_y_in_vect == 2'b01) ? w13 :
+                   (sel_y_in_vect == 2'b10) ? w14 :
+                   (sel_y_in_vect == 2'b11) ? w15 :
+                   (sel_y_in_vect == 3'b100) ? w16 :
+                   (sel_y_in_vect == 3'b101) ? w17 :
+                                               w12;
+                                             
+assign mux_out_xin_vect =   sel_x_in_vect ? norm : w11;
+
+assign mux_out_yin_rot  =  (sel_y_in_rot == 3'b000) ? w_rot[0] :
+                           (sel_y_in_rot == 3'b001) ? w_rot[1]:
+                           (sel_y_in_rot == 3'b010) ? w_rot[2]:
+                           (sel_y_in_rot == 3'b011) ? w_rot[3]:
+                           (sel_y_in_rot == 3'b100) ? w_rot[4]:
+                           (sel_y_in_rot == 3'b101) ? w_rot[5]:
+                           (sel_y_in_rot == 3'b110) ? w_rot[6]:
+                                                      w_rot[0];
+reg out;
+always @ (posedge clk or negedge rst)
+begin
+	if(!rst)
+	begin
+	    w_rot[0] = 32'h001_00000;
+	    w_rot[1] = 32'h000_00000;
+	    w_rot[2] = 32'h000_00000;
+	    w_rot[3] = 32'h000_00000;
+	    w_rot[4] = 32'h000_00000;
+	    w_rot[5] = 32'h000_00000;
+	    w_rot[6] = 32'h000_00000;
+	    w_rot[7] = 32'h000_00000;
+	    out <= 0;
+		counter <= 0;
+		counter_dummy <= 0;
+		sel_x_in_vect <= 0;
+		sel_y_in_vect <= 0;
+		cordic_vec_angle_calc_en <= 0;
+	end
+	else
+	begin 
+	        cordic_rot_en <= 1;
+            counter <= counter_dummy;
+            counter_dummy <= counter_dummy + 1;	           
+	end
+end
+// FOR CONTROLLING THE VECTOR BLOCK
+always @ (counter) 
+begin
+    if(counter > 33 & counter <37)
+    begin
+     cordic_vec_en <= 0;
+     //sel_y_in_rot <= 0;
+    end
+    else cordic_vec_en <= 1;
+end
+// CONTROL OF SELECT SIGNALS X IN VECTOR MODE
+always @ (counter) 
+begin
+	    case (counter!=0)
+	       1'b1: sel_x_in_vect <= 1;
+	       default: sel_x_in_vect <= 0;
+	    endcase
+end
+// CONTROL OF SELECT SIGNALS Y IN VECTOR MODE
+always @ (*) 
+begin
+    if(counter == 18)
+    begin
+       // sel_y_in_vect <= 1;
+        w_rot[1] <= cordic_rot_yout;
+        w_rot[2] <= cordic_rot_xout;
+        //w_rot[3] <= 16'h01_00;
+    end
+        // else if
+        // else if(counter == 35) sel_y_in_vect <= 2;
+    
+     else if(counter == 35 ) w_rot[3] <= cordic_rot_xout;
+     else if(counter == 37 ) w_rot[2] <= cordic_rot_yout;
+     else if(counter == 36 ) w_rot[1] <= cordic_rot_yout;
+    // else if(counter== 58)  sel_y_in_vect <= 3;
+   
+   
+   
+    
+    else if(counter == 55) w_rot[4] <= cordic_rot_xout;
+    else if(counter == 56) w_rot[1] <= cordic_rot_yout;
+    else if(counter == 57) w_rot[2] <= cordic_rot_yout;
+    else if(counter == 58) w_rot[3] <= cordic_rot_yout;
+    
+    else if(counter == 76) w_rot[5] <= cordic_rot_xout;
+    else if(counter == 77) w_rot[1] <= cordic_rot_yout;
+    else if(counter == 78) w_rot[2] <= cordic_rot_yout;
+    else if(counter == 79) w_rot[3] <= cordic_rot_yout;  
+    else if(counter == 80) w_rot[4] <= cordic_rot_yout;  
+    
+    else if(counter == 99) w_rot[6] <= cordic_rot_xout;
+    else if(counter == 100) w_rot[1] <= cordic_rot_yout;
+    else if(counter == 101) w_rot[2] <= cordic_rot_yout;
+    else if(counter == 102) w_rot[3] <= cordic_rot_yout;  
+    else if(counter == 103) w_rot[4] <= cordic_rot_yout; 
+    else if(counter == 104) w_rot[5] <= cordic_rot_yout; 
+     
+    else if(counter == 122) w_rot[7] <= cordic_rot_xout;
+    else if(counter == 123) w_rot[1] <= cordic_rot_yout;
+    else if(counter == 124) w_rot[2] <= cordic_rot_yout;
+    else if(counter == 125) w_rot[3] <= cordic_rot_yout;  
+    else if(counter == 126) w_rot[4] <= cordic_rot_yout; 
+    else if(counter == 127) w_rot[5] <= cordic_rot_yout; 
+    else if(counter == 128) w_rot[6] <= cordic_rot_yout;
+    
+   
+    
+        
+      
+    
+    
+   // else sel_y_in_vect <= 0;
+end
+// CONTROL OF SELECT SIGNALS Y IN ROTATION MODE
+always @ (counter) 
+begin
+    if(counter == 0 || counter == 18 || counter == 38 || counter == 59 || counter == 82 || counter == 105)
+    begin
+        sel_y_in_rot <= 0;
+    end
+    else if(counter == 19 || counter == 39 || counter == 60 || counter == 83 || counter == 106)
+    begin
+        sel_y_in_rot <= 1;
+    end
+    else if(counter == 20|| counter == 40 || counter == 61 || counter == 84 || counter == 107)
+    begin
+        sel_y_in_rot <= 2;
+    end    
+    else if(counter == 21|| counter == 41 || counter == 62 || counter == 85 || counter == 108)
+    begin
+        sel_y_in_rot <= 3;
+    end  
+    else if(counter == 63 || counter == 86 || counter == 109)
+    begin
+        sel_y_in_rot <= 4;
+    end     
+    else if(counter == 87 || counter == 110)
+    begin
+        sel_y_in_rot <= 5;
+    end 
+    else if(counter == 111)
+    begin
+        sel_y_in_rot <= 6;
+    end 
+    
+end
+always @ (posedge cordic_vec_en)
+begin
+    sel_y_in_rot <= 0;
+end
+
+always @ (counter)
+begin
+    if(counter==17 || counter==35 || counter==58 || counter == 81 || counter == 104) 
+    begin
+        norm <= cordic_vec_xout;
+        sel_y_in_rot <= 0;
+    end
+    
+    if(counter == 81) sel_y_in_vect <= 4;
+    else if (counter == 104) sel_y_in_vect <= 5;
+    else if(counter == 17) sel_y_in_vect <= 1;
+    else if(counter == 35) sel_y_in_vect <= 2;
+    else if(counter == 58) sel_y_in_vect <= 3;
+end
+
+always@(posedge clk)
+begin
+    if(counter == 129)
+    begin
+        out <= 1;
+        counter <= 0;
+    end
+    else out <= 0;
+end
+assign wout11 = w_rot[1];
+assign wout12 = w_rot[2];
+assign wout13 = w_rot[3];
+assign wout14 = w_rot[4];
+assign wout15 = w_rot[5];
+assign wout16 = w_rot[6];
+assign wout17 = w_rot[7];
+assign norm_out = out;
+
+endmodule

@@ -1,0 +1,442 @@
+
+`timescale 1ns / 1ps
+module gso#(
+        
+        parameter DATA_WIDTH = 32, 
+        parameter CORDIC_WIDTH = 38,
+        parameter ANGLE_WIDTH = 32,
+        parameter CORDIC_STAGES = 16,
+        parameter NUM_VECTORS = 7     
+        )
+(
+    output gso_out,
+	input clk,
+	input rst,
+	input enable,
+	input signed [DATA_WIDTH-1:0] w11, w12, w13, w14,w15,w16,w17, w21, w22, w23,w24,w25,w26,w27,
+	output signed [DATA_WIDTH-1:0] wout21, wout22, wout23,wout24,wout25,wout26,wout27
+);
+
+
+// Input signals are implicitly wires, no need to declare them again.
+// Vectoring Inputs
+reg cordic_vec_en;
+reg signed [DATA_WIDTH-1:0] cordic_vec_xin;
+reg signed [DATA_WIDTH-1:0] cordic_vec_yin;
+reg cordic_vec_angle_calc_en;                 // Enable calculation of total angle from the micro-angles
+// Rotation Inputs
+reg cordic_rot_en;
+reg signed [DATA_WIDTH-1:0] cordic_rot_xin;
+reg signed [DATA_WIDTH-1:0] cordic_rot_yin;
+reg cordic_rot_angle_microRot_n;              // HIGH => Rotation Angle is given directly; LOW => Angle given as micro-rotations
+reg signed [ANGLE_WIDTH-1:0] cordic_rot_angle_in;
+reg [CORDIC_STAGES-1:0] cordic_rot_microRot_ext_in;
+reg cordic_rot_microRot_ext_vld;              // If HIGH => Micro-rotations are given from outside; LOW => Directly from Vectoring
+reg [1:0] cordic_rot_quad_in;
+reg micro_direct;
+// Vectoring Outputs (assuming assigned inside always blocks)
+wire cordic_vec_opvld;
+wire signed [DATA_WIDTH-1:0] cordic_vec_xout;
+wire [1:0] vec_quad;
+wire signed [ANGLE_WIDTH-1:0] vec_angle_out;
+wire [CORDIC_STAGES-1:0] vec_microRot_dir;
+wire vec_microRot_out_start;
+reg [ANGLE_WIDTH-1:0] rot_angle_in;
+// Rotation Outputs (assuming assigned inside always blocks)
+wire cordic_rot_opvld;
+wire signed [DATA_WIDTH-1:0] cordic_rot_xout;
+wire signed [DATA_WIDTH-1:0] cordic_rot_yout;
+wire signed [DATA_WIDTH-1:0]mux_out_xin_vect,mux_out_yin_vect,mux_out_xin_rot,mux_out_yin_rot;
+CORDIC_doubly_pipe_top #(
+        .DATA_WIDTH (DATA_WIDTH),
+        .CORDIC_WIDTH (CORDIC_WIDTH),
+        .ANGLE_WIDTH (ANGLE_WIDTH),
+        .CORDIC_STAGES (CORDIC_STAGES)
+    )doubly_pipeline(
+         .clk(clk),
+         .nreset(rst),
+        // Vectoring Inputs
+         .cordic_vec_en(cordic_vec_en),
+         .cordic_vec_xin(mux_out_xin_vect),
+         .cordic_vec_yin(mux_out_yin_vect),
+         .cordic_vec_angle_calc_en(1),               // Enable calculation of total angle from the micro-angles
+        // Rotation Inputs
+         .cordic_rot_en(cordic_rot_en),
+         .cordic_rot_xin(mux_out_xin_rot),
+         .cordic_rot_yin(mux_out_yin_rot),
+         .cordic_rot_angle_microRot_n(micro_direct),         // HIGH => Rotation Angle is given directly; LOW => Angle given as micro-rotations
+         .cordic_rot_angle_in(rot_angle_in),     
+         .cordic_rot_microRot_ext_in(cordic_rot_microRot_ext_in),
+         .cordic_rot_microRot_ext_vld(cordic_rot_microRot_ext_vld),         // If HIGH => Micro-rotations are given from outside; LOW => Directly from Vectoring
+         .cordic_rot_quad_in(0),        
+        // Vectoring Outputs 
+         .cordic_vec_opvld(cordic_vec_opvld),
+         .cordic_vec_xout(cordic_vec_xout), // I HAVE TO ASSIGN THIS TO NORM
+         .vec_quad(vec_quad),
+         .vec_angle_out(vec_angle_out),
+         .vec_microRot_dir(vec_microRot_dir),
+         .vec_microRot_out_start(vec_microRot_out_start),
+       // Rotation Outputs
+         .cordic_rot_opvld(cordic_rot_opvld),
+         .cordic_rot_xout(cordic_rot_xout),
+         .cordic_rot_yout(cordic_rot_yout)
+
+);
+reg gso_o;
+reg flag;
+wire[15:0] cordic_rot_dir;
+wire [31:0] angle_final;
+assign cordic_rot_dir = cordic_rot_microRot_ext_vld ? cordic_rot_microRot_ext_in : vec_microRot_dir;
+angle_in_degrees instance_val (.directions(cordic_rot_dir), .angle_final(angle_final));
+reg [15:0] counter;
+reg [15:0] counter_dummy;
+
+reg signed [DATA_WIDTH-1:0] w_rotx;
+reg signed [DATA_WIDTH-1:0] w_roty;
+ 
+reg [2:0]sel_x_in_vect;
+reg [2:0] sel_y_in_vect;
+
+reg [2:0] sel_x_in_rot;
+reg [2:0] sel_y_in_rot;
+
+reg [ANGLE_WIDTH-1:0] theta1;
+reg [ANGLE_WIDTH-1:0] theta2;
+reg check;
+reg [CORDIC_STAGES-1:0] theta_bank1;
+reg [CORDIC_STAGES-1:0] theta_bank2;
+
+//wire signed [DATA_WIDTH-1:0] mux_out_xin_vect;
+//wire signed [DATA_WIDTH-1:0] mux_out_yin_vect;
+
+//wire signed [DATA_WIDTH-1:0] mux_out_xin_rot;
+//wire signed [DATA_WIDTH-1:0] mux_out_yin_rot;
+
+reg signed [DATA_WIDTH-1:0] norm;
+reg signed [DATA_WIDTH-1:0] w_rot [0:NUM_VECTORS];
+reg [DATA_WIDTH-1:0] w_inter_x;
+reg [DATA_WIDTH-1:0] w_inter_y;
+
+reg [DATA_WIDTH-1:0] w21bar,w22bar,w23bar;
+
+reg [DATA_WIDTH-1:0] rotx7dl1;
+reg [DATA_WIDTH-1:0] rotx7dl2;
+reg [DATA_WIDTH-1:0] rotx7dl3;
+reg [DATA_WIDTH-1:0] rotx7dl4;
+reg [DATA_WIDTH-1:0] rotx7dl5;
+reg [DATA_WIDTH-1:0] rotx7dl6;
+
+reg [DATA_WIDTH-1:0] roty7dl1;
+reg [DATA_WIDTH-1:0] roty7dl2;
+reg [DATA_WIDTH-1:0] roty7dl3;
+reg [DATA_WIDTH-1:0] roty7dl4;
+reg [DATA_WIDTH-1:0] roty7dl5;
+reg [DATA_WIDTH-1:0] roty7dl6;
+
+reg [DATA_WIDTH-1:0] norm1;
+reg [DATA_WIDTH-1:0] norm2;
+reg [DATA_WIDTH-1:0] norm3;
+reg [DATA_WIDTH-1:0] norm4;
+reg [DATA_WIDTH-1:0] norm5;
+reg [DATA_WIDTH-1:0] norm6;
+//reg [DATA_WIDTH-1:0] norm7;
+//reg [DATA_WIDTH-1:0] norm8;
+
+reg [DATA_WIDTH-1:0] x_stage1after2theta;
+reg [DATA_WIDTH-1:0] y_stage1after2theta;
+
+reg [DATA_WIDTH-1:0] x_stage2after2theta;
+reg [DATA_WIDTH-1:0] y_stage2after2theta;
+
+reg [DATA_WIDTH-1:0] x_stage3after2theta;
+reg [DATA_WIDTH-1:0] y_stage3after2theta;
+
+reg [DATA_WIDTH-1:0] x_stage4after2theta;
+reg [DATA_WIDTH-1:0] y_stage4after2theta;
+
+reg [DATA_WIDTH-1:0] x_stage5after2theta;
+reg [DATA_WIDTH-1:0] y_stage5after2theta;
+
+reg [DATA_WIDTH-1:0] x_stage6after2theta;
+reg [DATA_WIDTH-1:0] y_stage6after2theta;
+
+reg [DATA_WIDTH-1:0] x_after2ndstage;
+reg [DATA_WIDTH-1:0] y_after2ndstage;
+
+assign mux_out_xin_vect = (sel_x_in_vect == 3'b000) ? w11 :
+                          (sel_x_in_vect == 3'b001) ? norm:
+                          (sel_x_in_vect == 3'b010) ? norm1: 
+                          (sel_x_in_vect == 3'b011) ? norm2: 
+                          (sel_x_in_vect == 3'b100) ? norm3: 
+                          (sel_x_in_vect == 3'b101) ? norm4: 
+                          (sel_x_in_vect == 3'b110) ? norm5: 
+                                                        w11;
+
+assign mux_out_yin_vect = (sel_y_in_vect == 3'b000) ? w12:
+                          (sel_y_in_vect == 3'b001) ? w13:
+                          (sel_y_in_vect == 3'b010) ? w14: 
+                          (sel_y_in_vect == 3'b011) ? w15: 
+                          (sel_y_in_vect == 3'b100) ? w16: 
+                          (sel_y_in_vect == 3'b101) ? w17: 
+                                                      w12; 
+
+assign mux_out_xin_rot =   (sel_x_in_rot == 3'b000) ? w21:
+                           (sel_x_in_rot == 3'b001) ? w_rot[1]:
+                           (sel_x_in_rot == 3'b011) ? 0:
+                           (sel_x_in_rot == 3'b111) ? w_inter_x:
+                                                      w21;
+                                                      
+assign mux_out_yin_rot =   (sel_y_in_rot == 3'b000) ? w22:
+                           (sel_y_in_rot == 3'b001) ? w23:
+                           (sel_y_in_rot == 3'b010) ? w24:
+                           (sel_y_in_rot == 3'b011) ? w25:
+                           (sel_y_in_rot == 3'b100) ? w26:
+                           (sel_y_in_rot == 3'b101) ? w27:
+                           (sel_y_in_rot == 3'b110) ? w_rot[2]:
+                           (sel_y_in_rot == 3'b111) ? w_inter_y:
+                                                      w22;
+
+always @ (posedge clk or negedge rst)
+begin
+    if(!rst)
+    begin
+        counter <= 0;
+        counter_dummy <= 0;
+        micro_direct <= 0;
+        sel_x_in_vect <= 0;
+        sel_y_in_vect <= 0;
+        sel_x_in_rot <= 0;
+        sel_y_in_rot <= 0;
+        cordic_rot_microRot_ext_vld <= 0;
+        flag <= 0;
+        gso_o<=0;
+        //cordic_vec_en <= 0;
+    end
+    
+    else
+    begin
+        cordic_vec_en <= 1;
+        cordic_rot_en <= 1;
+        counter <= counter_dummy;
+        counter_dummy <= counter_dummy + 1;
+        ///my changes
+        if(counter==225)
+        begin
+        gso_o<=1;
+        end
+        else
+        gso_o<=0;
+    end
+end
+// VECTORING SELECT X LOGIC
+always @ (counter)
+begin
+         if(counter == 0)    sel_x_in_vect <= 0;
+    else if(counter == 126)  sel_x_in_vect <= 5;
+    else if(counter === 145) sel_x_in_vect <= 4;
+    else if(counter === 164) sel_x_in_vect <= 3;
+    else if(counter === 183) sel_x_in_vect <= 2;
+    else if(counter === 202) sel_x_in_vect <= 0;
+    else sel_x_in_vect <= 1;
+end
+
+// VECTORING SELECT Y LOGIC
+always @ (counter)
+begin
+    if(counter == 17) sel_y_in_vect <= 1;
+    else if(counter == 35) sel_y_in_vect <= 2;
+    else if(counter == 53) sel_y_in_vect <= 3;
+    else if(counter == 71) sel_y_in_vect <= 4;
+    else if(counter == 89) sel_y_in_vect <= 5;
+    else if(counter == 126) sel_y_in_vect <= 4;
+    else if(counter === 145) sel_y_in_vect <= 3;
+    else if(counter === 164) sel_y_in_vect <= 2;
+    else if(counter === 183) sel_y_in_vect <= 1;
+    else if(counter === 202) sel_y_in_vect <= 0;
+    
+    
+end
+
+//VECTORING NORM LOGIC
+always @ (counter)
+begin
+    if(counter == 17) norm <= cordic_vec_xout;
+    else if(counter == 35) norm <= cordic_vec_xout;
+    else if(counter == 53) norm <= cordic_vec_xout;
+    else if(counter == 71) norm <= cordic_vec_xout;
+    else if(counter == 89) norm <= cordic_vec_xout;
+    
+end
+
+//VECTORING NORM STORAGE
+
+always @ (counter)
+begin
+    if     (counter == 17) norm1 <= cordic_vec_xout;
+    else if(counter == 35) norm2 <= cordic_vec_xout;
+    else if(counter == 53) norm3 <= cordic_vec_xout;
+    else if(counter == 71) norm4 <= cordic_vec_xout;
+    else if(counter == 89) norm5 <= cordic_vec_xout;
+    
+    
+end
+
+//VALUE STORAGE
+always @ (counter)
+begin
+    if(counter == 18)
+    begin
+        rotx7dl1 <= cordic_rot_xout;
+        roty7dl1 <= cordic_rot_yout;
+        
+        w_rotx   <= cordic_rot_xout;
+        w_roty   <= cordic_rot_yout;
+        w_rot[1] <= cordic_rot_xout;
+    end
+    else if(counter == 36)
+    begin
+        rotx7dl2 <= cordic_rot_xout;
+        roty7dl2 <= cordic_rot_yout;
+        w_rot[1] <= cordic_rot_xout;
+    end
+    else if(counter == 54)
+    begin
+        rotx7dl3 <= cordic_rot_xout;
+        roty7dl3 <= cordic_rot_yout;
+        w_rot[1] <= cordic_rot_xout;
+    end
+    else if(counter == 72)
+    begin
+        rotx7dl4 <= cordic_rot_xout;
+        roty7dl4 <= cordic_rot_yout;
+        w_rot[1] <= cordic_rot_xout;
+    end
+    
+    else if(counter == 90)
+    begin
+        rotx7dl5 <= cordic_rot_xout;
+        roty7dl5 <= cordic_rot_yout;
+        w_rot[1] <= cordic_rot_xout;
+    end
+    else if(counter === 108)
+    begin
+        w_inter_x <= cordic_rot_xout;
+        w_inter_y <= cordic_rot_yout;
+        w_rot[1] <= cordic_rot_xout;
+    end
+    else if(counter === 126)
+    begin
+        rotx7dl6 <= cordic_rot_xout;
+        roty7dl6 <= cordic_rot_yout;
+        w_rot[2] <= cordic_rot_xout + rotx7dl5;
+    end
+    else if(counter === 145)
+    begin
+        x_stage1after2theta <= cordic_rot_xout;
+        y_stage1after2theta <= cordic_rot_yout;
+        w_rot[2] <= cordic_rot_yout;
+    end
+    else if(counter === 164)
+    begin
+        x_stage2after2theta <= cordic_rot_xout;
+        y_stage2after2theta <= cordic_rot_yout;
+        w_rot[2] <= cordic_rot_yout;
+    end
+    else if(counter === 183)
+    begin
+        x_stage3after2theta <= cordic_rot_xout;
+        y_stage3after2theta <= cordic_rot_yout;
+        w_rot[2] <= cordic_rot_yout;
+    end
+    else if(counter === 202)
+    begin
+        x_stage4after2theta <= cordic_rot_xout;
+        y_stage4after2theta <= cordic_rot_yout;
+        w_rot[2] <= cordic_rot_yout;
+    end
+    else if(counter === 221)
+    begin
+        x_stage5after2theta <= cordic_rot_xout;
+        y_stage5after2theta <= cordic_rot_yout;
+        w_rot[2] <= cordic_rot_yout;
+    end
+    
+end
+
+//ROTATION MODE Y SELECT LOGIC
+always @ (counter)
+begin
+    if(counter == 17) sel_y_in_rot <= 0;
+    else if (counter == 18) sel_y_in_rot <= 1;
+    else if (counter == 36) sel_y_in_rot <= 2;
+    else if(counter == 54)  sel_y_in_rot <= 3;
+    else if(counter == 72)  sel_y_in_rot <= 4;
+    else if(counter == 89)  sel_y_in_rot <= 5;
+    else if(counter == 108)  sel_y_in_rot <= 7;
+    else if(counter == 126) sel_y_in_rot <= 6;
+    else if(counter === 145) sel_y_in_rot <= 6;
+    else if(counter === 164) sel_y_in_rot <= 6;
+    else if(counter === 183) sel_y_in_rot <= 6;
+    else if(counter === 202) sel_y_in_rot <= 6;
+    
+    
+
+end
+
+//ROTATION MODE X SELECT LOGIC
+always @ (counter)
+begin
+    if(counter == 17) sel_x_in_rot <= 0;
+    else if (counter == 18) sel_x_in_rot <=  1;
+    else if(counter == 36) sel_x_in_rot <= 1;
+    else if(counter == 54) sel_x_in_rot <= 1;
+    else if(counter == 72) sel_x_in_rot <= 1;
+    else if(counter == 89) sel_x_in_rot <= 1;
+    else if(counter == 108)  sel_x_in_rot <= 7;
+    else if(counter == 126) sel_x_in_rot <= 3;
+    else if(counter === 145) sel_x_in_rot <= 3;
+    else if(counter === 164) sel_x_in_rot <= 3;
+    else if(counter === 183) sel_x_in_rot <= 3;
+    else if(counter === 202) sel_x_in_rot <= 3;
+    
+
+end
+
+// FLAG CONTROLLER
+//always @ (counter)
+//begin
+//    if(counter == 225)
+//    begin
+//        flag <= 1;
+//        counter <= 0;
+//    end
+//    else flag <= 0;
+//end
+
+always @ (counter)
+begin
+    if(counter == 90) 
+    begin
+        w21bar <= w21 - (cordic_rot_yout >>> 1);
+        w22bar <= w22 - (cordic_rot_xout >>> 1);
+        w23bar <= w23 - ((w23 ) >>> 1);
+    end
+end
+//
+assign gso_out = gso_o;
+assign wout21  =  y_stage5after2theta[31]===0 ? w21 - (y_stage5after2theta >>> 1)   :    w21-(-(-(y_stage5after2theta) >>> 1));
+assign wout22  =  x_stage5after2theta[31]===0 ? w22 - (x_stage5after2theta >>> 1)   :    w22-(-(-(x_stage5after2theta) >>> 1));
+assign wout23  =  x_stage4after2theta[31]===0 ? w23 - (x_stage4after2theta >>> 1)   :    w23-(-(-(x_stage4after2theta) >>> 1));
+assign wout24  =  x_stage3after2theta[31]===0 ? w24 - (x_stage3after2theta >>> 1)   :    w24 - (-(-(x_stage3after2theta) >>> 1));
+assign wout25  =  x_stage2after2theta[31]===0 ? w25 - (x_stage2after2theta >>> 1)   :    w25 - (-(-(x_stage2after2theta) >>> 1));
+assign wout26  =  x_stage1after2theta[31]===0 ? w26 - (x_stage1after2theta >>> 1)   :    w26 - (-(-(x_stage1after2theta) >>> 1));
+assign wout27  =  (w27-roty7dl6)>=0           ? w27 - ((w27-roty7dl6) >>> 1)        :    w27 - (-(-(w27-roty7dl6) >>> 1));
+
+//assign wout22 = w22 - (x_stage5after2theta >>> 1);
+//assign wout23 = w23 - (x_stage4after2theta >>> 1);
+//assign wout24 = w24 - (x_stage3after2theta >>> 1);
+//assign wout25 = w25 - (x_stage2after2theta >>> 1);
+//assign wout26 = w26 - (x_stage1after2theta >>> 1);
+//assign wout27 = w27 - ((w27-roty7dl6) >>> 1);
+
+endmodule

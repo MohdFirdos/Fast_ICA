@@ -1,0 +1,288 @@
+`timescale 1ns / 1ps
+module estimation#
+(
+        parameter DATA_WIDTH = 32,
+        parameter CORDIC_WIDTH = 38,
+        parameter ANGLE_WIDTH = 32,
+        parameter CORDIC_STAGES = 16,
+        parameter NUM_VECTORS = 7
+       
+)
+(
+
+input clk,
+input rst,
+input enable,
+output reg update_out,
+input signed [DATA_WIDTH-1:0] w11,w12,w13,w14,w15,w16,w17,
+input signed [DATA_WIDTH-1:0] z1,z2,z3,z4,z5,z6,z7,
+
+output reg signed [DATA_WIDTH-1:0] g7d,
+output signed [DATA_WIDTH-1:0] wout11,wout12,wout13,wout14,wout15,wout16,wout17
+
+);
+
+wire signed [DATA_WIDTH-1:0] mux_out_xin_vect;
+wire signed [DATA_WIDTH-1:0] mux_out_yin_vect;
+wire signed [DATA_WIDTH-1:0] mux_out_yin_rot;
+wire signed [DATA_WIDTH-1:0] mux_out_xin_rot;
+
+reg signed [DATA_WIDTH-1:0] norm;
+
+// Input signals are implicitly wires, no need to declare them again.
+// Vectoring Inputs
+reg cordic_vec_en;
+reg signed [DATA_WIDTH-1:0] cordic_vec_xin;
+reg signed [DATA_WIDTH-1:0] cordic_vec_yin;
+reg cordic_vec_angle_calc_en;                 // Enable calculation of total angle from the micro-angles
+// Rotation Inputs
+reg cordic_rot_en;
+reg signed [DATA_WIDTH-1:0] cordic_rot_xin;
+reg signed [DATA_WIDTH-1:0] cordic_rot_yin;
+reg cordic_rot_angle_microRot_n;              // HIGH => Rotation Angle is given directly; LOW => Angle given as micro-rotations
+reg signed [ANGLE_WIDTH-1:0] cordic_rot_angle_in;
+reg [CORDIC_STAGES-1:0] cordic_rot_microRot_ext_in;
+reg cordic_rot_microRot_ext_vld;              // If HIGH => Micro-rotations are given from outside; LOW => Directly from Vectoring
+reg [1:0] cordic_rot_quad_in;
+
+// Vectoring Outputs (assuming assigned inside always blocks)
+wire cordic_vec_opvld;
+wire signed [DATA_WIDTH-1:0] cordic_vec_xout;
+wire [1:0] vec_quad;
+wire signed [ANGLE_WIDTH-1:0] vec_angle_out;
+wire [CORDIC_STAGES-1:0] vec_microRot_dir;
+wire vec_microRot_out_start;
+
+// Rotation Outputs (assuming assigned inside always blocks)
+wire cordic_rot_opvld;
+wire signed [DATA_WIDTH-1:0] cordic_rot_xout;
+wire signed [DATA_WIDTH-1:0] cordic_rot_yout;
+
+CORDIC_doubly_pipe_top #(
+        .DATA_WIDTH (DATA_WIDTH),
+        .CORDIC_WIDTH (CORDIC_WIDTH),
+        .ANGLE_WIDTH (ANGLE_WIDTH),
+        .CORDIC_STAGES (CORDIC_STAGES)
+    )doubly_pipeline(
+         .clk(clk),
+         .nreset(rst),
+       
+        // Vectoring Inputs
+
+         .cordic_vec_en(cordic_vec_en),
+         .cordic_vec_xin(mux_out_xin_vect),
+         .cordic_vec_yin(mux_out_yin_vect),
+         .cordic_vec_angle_calc_en(cordic_vec_angle_calc_en),               // Enable calculation of total angle from the micro-angles
+       
+        // Rotation Inputs
+       
+         .cordic_rot_en(cordic_rot_en),
+         .cordic_rot_xin(mux_out_xin_rot),
+         .cordic_rot_yin(mux_out_yin_rot),
+         .cordic_rot_angle_microRot_n(0),         // HIGH => Rotation Angle is given directly; LOW => Angle given as micro-rotations
+         .cordic_rot_angle_in(0),    
+         .cordic_rot_microRot_ext_in(0),
+         .cordic_rot_microRot_ext_vld(0),         // If HIGH => Micro-rotations are given from outside; LOW => Directly from Vectoring
+         .cordic_rot_quad_in(0),  
+             
+        // Vectoring Outputs
+       
+         .cordic_vec_opvld(cordic_vec_opvld),
+         .cordic_vec_xout(cordic_vec_xout), // I HAVE TO ASSIGN THIS TO NORM
+         .vec_quad(vec_quad),
+         .vec_angle_out(vec_angle_out),
+         .vec_microRot_dir(vec_microRot_dir),
+         .vec_microRot_out_start(vec_microRot_out_start),
+         
+       // Rotation Outputs
+       
+         .cordic_rot_opvld(cordic_rot_opvld),
+         .cordic_rot_xout(cordic_rot_xout),
+         .cordic_rot_yout(cordic_rot_yout)
+
+);
+
+reg [DATA_WIDTH-1:0] ans;
+reg [DATA_WIDTH-1:0] ans_dummy;
+reg [DATA_WIDTH-1:0] ans_mem[0:15];
+reg [15:0] counter;
+reg  [15:0] counter_dummy;
+reg sel_x_in_vect;
+reg [2:0] sel_y_in_vect;
+reg [2:0] sel_x_in_rot;
+reg [2:0] sel_y_in_rot;
+reg signed [DATA_WIDTH-1:0] z_in[0:6][0:15];
+reg signed [DATA_WIDTH-1:0] w_rot [0:NUM_VECTORS];   
+reg signed [DATA_WIDTH-1:0] rotated_value;
+reg signed [DATA_WIDTH-1:0] counter_store;
+//reg signed [DATA_WIDTH-1:0] norm_vect;                       // NORM FROM THE VECTORING BLOCK
+always@(counter_store)
+begin
+        if(counter_store >= 1)
+        begin
+               z_in[0][counter_store-1]  =   z1; 
+               z_in[1][counter_store-1]  =   z2; 
+               z_in[2][counter_store-1]  =   z3; 
+               z_in[3][counter_store-1]  =   z4; 
+               z_in[4][counter_store-1]  =   z5; 
+               z_in[5][counter_store-1]  =   z6; 
+               z_in[6][counter_store-1]  =   z7; 
+         end
+end
+
+reg [5:0] row = 0;
+reg [5:0] col = 0;
+
+assign mux_out_yin_vect =  (sel_y_in_vect == 2'b00) ?  w12 :
+                           (sel_y_in_vect == 2'b01) ?  w13 :
+                           (sel_y_in_vect == 2'b10) ?  w14 :
+                           (sel_y_in_vect == 2'b11) ?  w15 :
+                           (sel_y_in_vect == 3'b100) ? w16 :
+                           (sel_y_in_vect == 3'b101) ? w17 :
+                                                       w12;
+                                             
+assign mux_out_xin_vect =   sel_x_in_vect ? cordic_vec_xout : w11;
+assign mux_out_yin_rot  =  z_in[row+1][col];                                                 
+assign mux_out_xin_rot  =  sel_x_in_rot ? cordic_rot_xout : z_in[0][col];
+
+always @ (posedge clk or negedge rst)
+begin
+if(!rst)
+begin
+      ans <= 0;
+      ans_dummy <= 0;
+      row <= 0;
+      col <= 0;
+      w_rot[0] = 32'h001_00000;
+    counter <= 0;
+    counter_dummy <= 0;
+    sel_x_in_vect <= 0;
+    sel_y_in_vect <= 0;
+    cordic_vec_angle_calc_en <= 0;
+    cordic_rot_xin <= 0;
+    norm<=0;
+    counter_store <= 0;
+    update_out<=0;
+end
+else if(counter_store <= 16)
+begin
+    counter_store <= counter_store + 1;
+end
+else if(counter_store == 17)
+begin
+    cordic_rot_en <= 1;
+    counter <= counter_dummy;
+    counter_dummy <= counter_dummy + 1;    
+    if(counter === 124) counter_dummy <= 0;      
+end
+end
+// FOR CONTROLLING THE VECTOR BLOCK
+always @ (counter)
+begin
+    if(counter > 33 & counter <37)
+    begin
+     cordic_vec_en <= 1;
+    end
+    else cordic_vec_en <= 1;
+end
+
+// CONTROL OF SELECT SIGNALS X IN VECTOR MODE
+
+always @ (counter)
+begin
+   case (counter>15)
+      1'b1: sel_x_in_vect <= 1;
+      default: sel_x_in_vect <= 0;
+   endcase
+end
+// CONTROL OF SELECT SIGNALS X IN ROTATION MODE
+always @ (counter)
+begin
+   case (counter > 16)
+      1'b1: sel_x_in_rot <= 1;
+      default: sel_x_in_rot <= 0;
+   endcase
+end
+
+// COLUMN LOGIC
+
+always@(counter)
+begin
+    if(counter >= 0)
+    begin
+        if((counter == 0) || counter==17 || counter == 34 || counter == 51 || counter == 68 || counter == 85) col <= 0;
+        else col <= col + 1;
+    end
+    if(col === 15) col <= 0;
+end
+
+// ROW LOGIC
+
+always@(counter)
+begin
+    if((counter == 0) || counter==17 || counter == 34 || counter == 51 || counter == 68 || counter == 85)
+    begin
+        if(counter == 0) row <= 0;
+        else row <= row + 1;
+    end
+end
+
+always @ (counter)
+begin
+    if(counter==16 || counter==33 || counter==50 || counter == 67 || counter == 84) sel_y_in_vect <= sel_y_in_vect + 1;
+end
+
+///my changes
+always@(posedge clk)
+begin
+if(update_out==1)
+g7d<=0;
+end
+
+//////
+
+always@(counter)
+begin
+    if(counter===101)
+    begin
+        update_out<=1;
+    end
+    else 
+    begin
+        update_out<=0;
+    end
+end
+always@(counter)
+begin
+    if(counter >= 103 && counter <=118) 
+    begin
+        ans_dummy <= ans_dummy + (cordic_rot_xout>>>4);
+        //update_out <= 1;
+        g7d <= (cordic_rot_xout);
+        //ans_mem[counter - 103] <= ans_dummy;
+    end
+end
+
+always@(counter)
+begin
+    if(counter >= 102 && counter <=117) 
+    begin
+        //ans_mem[counter - 103] <= ans_dummy;
+    end
+    
+    
+end
+
+always@(counter)
+begin
+    if(counter === 119) 
+    begin
+        ans <= ans_dummy;
+    end
+
+end
+
+wire [63:0] square;
+wire [63:0] cube;
+    
+endmodule
